@@ -131,7 +131,7 @@ dmypy.json
 lightning_logs/
 
 tb_logs/
-
+data/
 output/
 
 .lr*
@@ -145,3 +145,6 @@ hall_of_fame_*
 *_share.pkl
 
 scratchpad/
+
+*.out
+slurm/

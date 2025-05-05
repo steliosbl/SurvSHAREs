@@ -1,3 +1,3 @@
 [submodule "gplearn"]
 	path = gplearn
-	url = https://github.com/krzysztof-kacprzyk/gplearn-share.git
+	url = https://github.com/steliosbl/gplearn-share.git

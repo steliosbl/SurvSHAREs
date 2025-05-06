@@ -6,7 +6,32 @@ from lifelines.datasets import load_rossi, load_gbsg2
 from pycox.datasets import metabric
 
 
-class Rossi:
+class Dataset:
+    def __init__(self):
+        pass
+
+    def load_df(self):
+        raise NotImplementedError()
+
+    def load(self, normalise=False):
+        raise NotImplementedError()
+
+    def summary(self):
+        df = self.load_df()
+
+        summarise = (
+            lambda s: s[
+                (s >= (q1 := s.quantile(0.25)) - 1.5 * (iqr := s.quantile(0.75) - q1))
+                & (s <= q1 + 1.5 * iqr)
+            ]
+            .agg(["min", "max"])
+            .to_dict()
+        )
+
+        return df.select_dtypes(include="number").apply(summarise).to_dict()
+
+
+class Rossi(Dataset):
     features = ["fin", "age", "race", "wexp", "mar", "paro", "prio"]
     event = "arrest"
     time = "week"
@@ -14,9 +39,11 @@ class Rossi:
     categorical_dict = {0: 2, 2: 2, 3: 2, 4: 2, 5: 2}
     tmax = 52
 
-    @staticmethod
-    def load(normalise=False):
-        X = load_rossi()
+    def load_df(self):
+        return load_rossi()
+
+    def load(self, normalise=False):
+        X = self.load_df()
         T = X.pop("week").values
         E = X.pop("arrest").values
 
@@ -28,7 +55,7 @@ class Rossi:
         return X, T, E
 
 
-class Metabric:
+class Metabric(Dataset):
     features = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8"]
     event = "event"
     time = "duration"
@@ -36,9 +63,11 @@ class Metabric:
     categorical_dict = {4: 2, 5: 2, 6: 2, 7: 2}
     tmax = 350  # Not entirely accurate
 
-    @staticmethod
-    def load(normalise=False):
-        X = metabric.read_df()
+    def load_df(self):
+        return metabric.read_df()
+
+    def load(self, normalise=False):
+        X = self.load_df()
         T = X.pop("duration").values
         E = X.pop("event").values
 
@@ -50,7 +79,7 @@ class Metabric:
         return X, T, E
 
 
-class GBSG2:
+class GBSG2(Dataset):
     features = [
         "horTh",
         "age",
@@ -67,9 +96,11 @@ class GBSG2:
     categorical_dict = {0: 2, 3: 3, 7: 2}
     tmax = 2296  # Not entirely accurate
 
-    @staticmethod
-    def load(normalise=False):
-        X = load_gbsg2()
+    def load_df(self):
+        return load_gbsg2()
+
+    def load(self, normalise=False):
+        X = self.load_df()
         T = X.pop("time").values
         E = 1 - X.pop("cens").values
 

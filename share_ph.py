@@ -3,6 +3,8 @@ import pandas as pd
 import warnings
 from pathlib import Path
 import argparse
+import os
+from datetime import datetime
 
 # Data
 from datasets import Rossi, Metabric, GBSG2
@@ -192,19 +194,31 @@ def test_share_ph(
     print("Starting model fit")
     model.fit(X_train, T_train, sample_weight=E_train)
     print("Finished model fit")
+    timestamp = model.timestamp
+    # timestamp = max(
+    #     os.listdir(checkpoint_dir),
+    #     key=lambda x: datetime.strptime(x, "%Y-%m-%dT%H.%M.%S"),
+    # )
 
     # Load results dataframe
-    results_df = pd.read_csv(checkpoint_dir / model.timestamp / "dictionary.csv")
+    results_df = pd.read_csv(checkpoint_dir / timestamp / "dictionary.csv")
 
     print("Adding validation results")
-    n_shapes, n_variables, loss_test, c_test, brier_test = [], [], [], [], []
+    n_shapes, n_variables, loss_train, loss_test, c_test, brier_test = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     for idx, id, eq, _, _ in results_df.itertuples():
         print(eq)
         n_shapes.append(get_n_shapes(eq))
         n_variables.append(get_n_variables(eq))
 
         esr = load_share_from_checkpoint(
-            model.timestamp,
+            timestamp,
             eq,
             checkpoint_dir=checkpoint_dir,
             task="regression",
@@ -213,18 +227,27 @@ def test_share_ph(
         )
 
         esr_wrap = SymRegPH(model=esr)
-        h_pred = esr_wrap.predict(X_test)
+        h_train, h_test = esr_wrap.predict(X_train), esr_wrap.predict(X_test)
         h0 = esr_wrap.compute_baseline_hazards(X_train, (T_train, E_train))
-        surv_pred = esr_wrap.predict_surv_df(X_test)
+        surv_test = esr_wrap.predict_surv_df(X_test)
 
-        loss_test.append(fitness(T_test, h_pred, E_test))
-        c_test.append(metric_c_index(T_test, h_pred, E_test))
-        brier_test.append(
-            metric_integrated_brier(surv_pred, E_train, T_train, E_test, T_test)
-        )
+        loss_train.append(fitness(T_train, h_train, E_train))
+        loss_test.append(fitness(T_test, h_test, E_test))
+        c_test.append(metric_c_index(T_test, h_test, E_test))
+
+        brier = np.nan
+        if not surv_test.isna().any().any():  # Junk models will yield NaN values
+            try:
+                brier = metric_integrated_brier(
+                    surv_test, E_train, T_train, E_test, T_test
+                )
+            except Exception:
+                pass
+        brier_test.append(brier)
 
     results_df["n_shapes"] = n_shapes
     results_df["n_variables"] = n_variables
+    results_df["loss_train"] = loss_train
     results_df["loss_test"] = loss_test
     results_df["c_test"] = c_test
     results_df["brier_test"] = brier_test
@@ -233,7 +256,7 @@ def test_share_ph(
     if results_df["c_test"].mean() < 0.5:
         results_df["c_test"] = 1 - results_df["c_test"]
 
-    out_path = checkpoint_dir / model.timestamp / "output.csv"
+    out_path = checkpoint_dir / timestamp / "output.csv"
     print(f"Saving results to {out_path}")
     results_df.to_csv(out_path, index=False)
 

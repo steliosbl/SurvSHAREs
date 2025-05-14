@@ -148,3 +148,4 @@ scratchpad/
 
 *.out
 slurm/
+wandb/

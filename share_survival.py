@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 
 # Data
-from datasets import Rossi, Metabric, GBSG2
+from survshares.datasets import Rossi, Metabric, GBSG2
 from sklearn.model_selection import train_test_split
 
 # Fitness

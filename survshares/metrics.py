@@ -1,10 +1,13 @@
-import numpy as np 
-import warnings 
+import numpy as np
+import torch
+import warnings
 
 from lifelines.utils import concordance_index
 from pycox.evaluation.metrics import partial_log_likelihood_ph
 from sksurv.metrics import integrated_brier_score
-from sksurv.util import Surv 
+from sksurv.util import Surv
+from torchsurv.loss.cox import neg_partial_log_likelihood
+
 
 def c_index(y_true, y_pred, sample_weight):
     """
@@ -53,3 +56,19 @@ def integrated_brier(surv_pred, E_train, T_train, E_test=None, T_test=None):
     surv_pred = surv_pred.loc[times, :].T
 
     return integrated_brier_score(y_train, y_test, surv_pred, times)
+
+
+def negative_pll(y_true, y_pred, sample_weight):
+    """
+    Cox (negative) partial log-likelihood metric from torchsurv with Efron tie-handling. Less is better.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning)
+        return neg_partial_log_likelihood(
+            torch.tensor(y_pred),
+            torch.tensor(sample_weight, dtype=torch.bool),
+            torch.tensor(y_true),
+            ties_method="efron",
+            reduction="mean",
+            checks=True,
+        ).item()

@@ -44,7 +44,7 @@ def survival_probability_calibration(surv_pred, T, E, t0: float, ax=None):
     if ax is None:
         ax = plt.gca()
 
-    predictions_at_t0 = np.clip(1 - surv_pred.loc[t0].T.squeeze(), 1e-10, 1 - 1e-10)
+    predictions_at_t0 = np.clip(1 - surv_pred.iloc[-1].T.squeeze(), 1e-10, 1 - 1e-10)
 
     # create new dataset with the predictions
     prediction_df = pd.DataFrame(

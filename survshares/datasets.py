@@ -29,6 +29,10 @@ class Dataset:
         )
 
         return df.select_dtypes(include="number").apply(summarise).to_dict()
+    
+    def numerical_ranges(self, X):
+        return {i: (np.min(X[:, i]), np.max(X[:,i])) for i in range(X.shape[1]) if not i in self.categorical_dict.keys()}
+
 
 
 class Rossi(Dataset):

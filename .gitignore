@@ -149,3 +149,4 @@ scratchpad/
 *.out
 slurm/
 wandb/
+.DS_Store

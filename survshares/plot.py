@@ -39,7 +39,7 @@ def calibration_plot_binned(
     color = "tab:red"
     ax.plot(predicted, observed, "o-", label="Model", color=color)
     ax.set_title(
-        "Smoothed calibration curve of \npredicted vs observed event probabilities by $T \leq t_0$"
+        "Binned calibration curve of \npredicted vs observed event probabilities by $T \leq t_0$"
     )
     ax.set_xlabel("Predicted event probability by $t_0$: $1-\hat S(t_0)$")
     ax.set_ylabel("Observed event frequency by $T \leq t_0$", color=color)

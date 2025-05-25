@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
-import warnings 
+import warnings
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
 
 from lifelines.datasets import load_rossi, load_gbsg2
 from pycox.datasets import metabric
@@ -40,6 +41,7 @@ class SurvivalDataset:
                 warnings.warn("X is not loaded. Loading now, with normalise=False.")
                 self.load(normalise=False)
             return func(self, *args, **kwargs)
+
         return wrapper
 
     @property
@@ -57,9 +59,6 @@ class SurvivalDataset:
     @property
     @_check_loaded
     def numerical_ranges(self):
-        if self.X is None: 
-            warnings.warn("X is not loaded. Loading now, with normalise=False.")
-            self.load(normalise=False)
         if self._numerical_ranges is None:
             self._numerical_ranges = {
                 i: (np.min(self.X[:, i]), np.max(self.X[:, i]))
@@ -68,19 +67,24 @@ class SurvivalDataset:
             }
 
         return self._numerical_ranges
-    
+
     def _normalise_numericals(self, X: pd.DataFrame):
         columns_original = X.columns
-        numerical_cols = [col for col in self.features if col not in self.categorical_features]
+        numerical_cols = [
+            col for col in self.features if col not in self.categorical_features
+        ]
         ct = ColumnTransformer(
-            transformers=[
-                ("num", StandardScaler(), numerical_cols)
-            ],
+            transformers=[("num", StandardScaler(), numerical_cols)],
             remainder="passthrough",
-            verbose_feature_names_out=False
+            verbose_feature_names_out=False,
         ).set_output(transform="pandas")
         return ct.fit_transform(X)[columns_original].values
 
+    @_check_loaded
+    def split(self, train_size=0.8, random_state=None):
+        return train_test_split(
+            self.X, self.T, self.E, train_size=train_size, random_state=random_state
+        )
 
 
 class Rossi(SurvivalDataset):

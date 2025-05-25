@@ -6,8 +6,8 @@ import torchtuples as tt
 
 from sklearn.base import BaseEstimator, RegressorMixin
 from pycox.models.cox import _CoxPHBase
-from gplearn_clean.gplearn.genetic import BaseSymbolic, SymbolicRegressor
-from gplearn_clean.gplearn._program import _Program
+from gplearn.gplearn.genetic import BaseSymbolic, SymbolicRegressor
+from gplearn.gplearn._program import _Program
 from sksurv.util import Surv
 from sksurv.util import check_y_survival
 
@@ -36,10 +36,10 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         self.compute_baseline_hazards(X, (T, E))
         self.y_train = Surv.from_arrays(E, T)
         return self
-
+    
     def predict(self, X, *args, **kwargs):
         if isinstance(X, tt.TupleTree):
-            X = X[0]
+            X = torch.Tensor(X[0])
 
         if isinstance(self.model, BaseSymbolic):
             return self.model.predict(X)
@@ -55,6 +55,10 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
                 )
 
             return self.model.execute(X, ohe_matrices)
+        else:
+            raise ValueError(
+                "Model must be a BaseSymbolic or _Program instance."
+            )
 
     def score(self, X, T, E):
         # Predict hazards and survival
@@ -63,7 +67,7 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
 
         # Times for brier scores: min and max observed event times, within the range of validation T
         times = surv_pred.index.values[1:-1]
-        times = times[(times > T.min()) & (times < T.max())]
+        times = times[(times > T.min().item()) & (times < T.max().item())]
 
         # Fix for IPCW estimation (c_ipcw and dynamic AUC)
         # We can't have observed events exactly at the final observed time
@@ -79,7 +83,8 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         integrated_brier = integrated_brier_score(
             self.y_train, y_test, surv_pred.loc[times, :].T, times
         )
-        c_censored = concordance_index_censored(E.astype(bool), T, h_pred)
+        
+        c_censored = concordance_index_censored((E == 1) if not E.dtype in (torch.bool, np.bool) else E, T, h_pred)
         c_ipcw = concordance_index_ipcw(y_train_adjusted, y_test, h_pred)
         auc = cumulative_dynamic_auc(y_train_adjusted, y_test, h_pred, times)
 
@@ -117,10 +122,10 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
             neg_partial_log_likelihood=npll,
         )
     
-    def plot_calibration(self, X, T, E): 
+    def plot_calibration(self, X, T, E, t0=None): 
         surv_pred = self.predict_surv_df(X)
-        t0 = surv_pred.index.values[-1]
-        surv_pred_at_t0 = surv_pred.iloc[-1, :].values.squeeze()
+        t0 = t0 or surv_pred.index.values[-1]
+        surv_pred_at_t0 = surv_pred.loc[t0, :].values.squeeze()
 
         fig, ax = plt.subplots(1, 2, figsize=(12, 6))
         _, binned_ici, binned_e50 = calibration_plot_binned(surv_pred_at_t0, T, E, t0, ax=ax[0])

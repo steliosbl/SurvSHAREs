@@ -45,7 +45,11 @@ def calibration_plot_binned(
     ax.set_ylabel("Observed event frequency by $T \leq t_0$", color=color)
     ax.tick_params(axis="y", labelcolor=color)
 
-    ax.plot([0, 1], [0, 1], ls="--", color="black", label="Perfect")
+    x, y = (
+        np.clip(predictions_at_t0.min() - 0.01, 0, 1),
+        np.clip(predictions_at_t0.max() + 0.01, 0, 1)
+    )
+    ax.plot([x, y], [x, y], ls="--", color="black", label="Perfect")
 
     _calibration_plot_histogram(predictions_at_t0, ax)
     ax.legend()

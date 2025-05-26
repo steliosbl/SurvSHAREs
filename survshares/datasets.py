@@ -51,7 +51,7 @@ class SurvivalDataset:
             self._categorical_dict = {
                 self.features.index(col): np.unique(
                     self.X[:, self.features.index(col)]
-                ).tolist()
+                ).astype(int).tolist()
                 for col in self.categorical_features
             }
         return self._categorical_dict

@@ -62,7 +62,7 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
                 "Model must be a BaseSymbolic or _Program instance."
             )
 
-    def score(self, X, T, E):
+    def score(self, X, T, E, extended=True):
         # Predict hazards and survival
         h_pred, surv_pred = self.predict(X), self.predict_surv_df(X)
         y_test = Surv.from_arrays(E, T)
@@ -81,10 +81,12 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         )
 
         # Run metrics
-        brier = brier_score(self.y_train, y_test, surv_pred.loc[times, :].T, times)
-        integrated_brier = integrated_brier_score(
-            self.y_train, y_test, surv_pred.loc[times, :].T, times
-        )
+        brier, integrated_brier = (None, None), None
+        if not surv_pred.isna().any().any():
+            brier = brier_score(self.y_train, y_test, surv_pred.loc[times, :].T, times)
+            integrated_brier = integrated_brier_score(
+                self.y_train, y_test, surv_pred.loc[times, :].T, times
+            )
         
         c_censored = concordance_index_censored((E == 1) if not E.dtype in (torch.bool, np.bool) else E, T, h_pred)
         c_ipcw = concordance_index_ipcw(y_train_adjusted, y_test, h_pred)
@@ -93,7 +95,7 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         get_npll = lambda ties: neg_partial_log_likelihood(
             torch.tensor(h_pred),
             torch.tensor(E, dtype=torch.bool),
-            torch.tensor(T_train.copy()),
+            torch.tensor(T.copy()),
             ties_method=ties,
             reduction="mean",
             checks=True,
@@ -115,6 +117,15 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
 
         npll = dict(efron=npll_efron, breslow=npll_breslow)
 
+        if not extended:
+            return dict(
+                integrated_brier_score=integrated_brier,
+                concordance_index_censored=c_censored["value"],
+                concordance_index_ipcw=c_ipcw["value"],
+                cumulative_dynamic_auc=auc["mean"],
+                neg_partial_log_likelihood=npll["efron"],
+            )
+        
         return dict(
             brier_score=brier,
             intergrated_brier_score=integrated_brier,

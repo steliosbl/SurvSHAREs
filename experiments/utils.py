@@ -89,7 +89,7 @@ def create_df_from_cached_results(results_dict):
 
 
 
-def load_share_from_checkpoint(timestamp, program, checkpoint_dir='checkpoints', task='regression',n_features=3,equation_id=None, categorical_variables_dict={}, constructor_dict=None, shape_class=None):
+def load_share_from_checkpoint(timestamp, program, checkpoint_dir='checkpoints', task='regression', loss_fn=None, n_features=3,equation_id=None, categorical_variables_dict={}, constructor_dict=None, shape_class=None):
     # TODO: make it work in general, pickle configs and then load them
     if isinstance(program,str):
         # remove brackets
@@ -152,7 +152,7 @@ def load_share_from_checkpoint(timestamp, program, checkpoint_dir='checkpoints',
         'random_state': check_random_state(0),
           'optim_dict': {
             'alg':'adam',
-            'lr': 1e-2, # tuned automatically
+            # 'lr': 1e-2, # tuned automatically
             'max_n_epochs':1000,
             'tol':1e-3,
             'task':task,
@@ -161,13 +161,15 @@ def load_share_from_checkpoint(timestamp, program, checkpoint_dir='checkpoints',
             'shape_class':shape_class,
             'constructor_dict': constructor_dict,
             'num_workers_dataloader': 0,
-            'seed':42
+            'seed':42,
+            'loss_fn': loss_fn,
             },
         'timestamp':timestamp
     }
 
     program = _Program(**program_config, program=program_list)
-    program.categorical_variables_dict = categorical_variables_dict
+    # SBL: Go from dict with unique categorical values to dict with cardinality
+    program.categorical_variables_dict = {k: len(v) for k, v in categorical_variables_dict.items()}
     program.keys = sorted(categorical_variables_dict.keys())
 
  

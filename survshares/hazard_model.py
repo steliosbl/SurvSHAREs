@@ -6,8 +6,8 @@ import torchtuples as tt
 
 from sklearn.base import BaseEstimator, RegressorMixin
 from pycox.models.cox import _CoxPHBase
-from gplearn.gplearn.genetic import BaseSymbolic, SymbolicRegressor
-from gplearn.gplearn._program import _Program
+from gplearn.gplearn.genetic import SymbolicRegressor
+from gplearn.gplearn._program import _Program as _ShareProgram 
 from sksurv.util import Surv
 from sksurv.util import check_y_survival
 
@@ -39,11 +39,11 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
     
     def predict(self, X, *args, **kwargs):
         if isinstance(X, tt.TupleTree):
-            X = torch.Tensor(X[0])
+            X = X[0]
 
-        if isinstance(self.model, BaseSymbolic):
+        if hasattr(self.model, 'predict'):
             return self.model.predict(X)
-        elif isinstance(self.model, _Program):
+        elif isinstance(self.model, _ShareProgram):
             ohe_matrices = {}
 
             if self.categorical_variables is not None:
@@ -55,6 +55,8 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
                 )
 
             return self.model.execute(X, ohe_matrices)
+        elif hasattr(self.model, 'execute'):
+            return self.model.execute(X)
         else:
             raise ValueError(
                 "Model must be a BaseSymbolic or _Program instance."

@@ -117,11 +117,13 @@ def test_share_ph(
         categorical_variables=categorical_variables
     )
     
-    def generation_callback(population, best_program): 
+    def generation_callback(population, best_program, gen): 
+        # Refit because best_program is not guaranteed to be fitted yet if cached
+        best_program = best_program.fit(torch.Tensor(X_train), torch.Tensor(T_train), torch.Tensor(E_train), dataset.ohe_matrices(X_train)) 
         esr_wrap = HazardModel(
             best_program,
             categorical_variables=categorical_variables,
-        ).prepare_estimands(X_train, T_train, E_train)
+        ).prepare_estimands(X_train, T_train, E_train) 
         scores = esr_wrap.score(X_test, T_test, E_test, extended=False)
         scores.update(dict(
             id=best_program.id,
@@ -130,7 +132,7 @@ def test_share_ph(
             n_shapes=get_n_shapes(str(best_program)),
             n_variables=get_n_variables(str(best_program)),
         ))
-        wandb.log(scores)
+        wandb.log(scores, step=gen)
 
     print("Starting model fit")
     model.fit(torch.Tensor(X_train), torch.Tensor(T_train), torch.Tensor(E_train), generation_callback)

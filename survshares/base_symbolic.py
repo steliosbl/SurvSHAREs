@@ -84,4 +84,4 @@ class BaseSurvSymbolic(BaseSymbolic):
         ):
             self.wandb_run.log({
                 key: value[-1] for key, value in run_details.items()
-            })
+            }, step=run_details.get('generation', [None])[-1])

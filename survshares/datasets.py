@@ -1,14 +1,26 @@
 import numpy as np
 import pandas as pd
 import warnings
+import torch
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
+
 
 from lifelines.datasets import load_rossi, load_gbsg2
 from pycox.datasets import metabric
 
+def ohe_matrices(X, categorical_values, device):
+    X = X.cpu().numpy() if isinstance(X, torch.Tensor) else X
+    return {
+        k: torch.from_numpy(
+            OneHotEncoder(sparse_output=False, categories=[v]).fit_transform(
+                X[:, [k]].astype('int')
+            )
+        ).float().to(device)
+        for k, v in categorical_values.items()
+    }
 
 class SurvivalDataset:
     def __init__(self):
@@ -49,9 +61,9 @@ class SurvivalDataset:
     def categorical_values(self):
         if self._categorical_dict is None:
             self._categorical_dict = {
-                self.features.index(col): np.unique(
+                self.features.index(col): tuple(np.unique( # Must be a tuple for get_argument_ranges_for_shape_functions
                     self.X[:, self.features.index(col)]
-                ).astype(int).tolist()
+                ).astype(int).tolist())
                 for col in self.categorical_features
             }
         return self._categorical_dict
@@ -82,9 +94,26 @@ class SurvivalDataset:
 
     @_check_loaded
     def split(self, train_size=0.8, random_state=None):
-        return train_test_split(
+        X_train, X_test, T_train, T_test, E_train, E_test = train_test_split(
             self.X, self.T, self.E, train_size=train_size, random_state=random_state
         )
+
+        # We have to ensure that the minimum and maximum event time exist in the training set
+        if self.T.max() in T_test and not self.T.max() in T_train:
+            idx_from = np.random.choice(np.where(T_test == self.T.max())[0])
+            idx_to = np.random.randint(len(T_train))
+
+            X_train[idx_to], X_test[idx_from] = X_test[idx_from].copy(), X_train[idx_to].copy()
+            T_train[idx_to], T_test[idx_from] = T_test[idx_from].copy(), T_train[idx_to].copy()
+            E_train[idx_to], E_test[idx_from] = E_test[idx_from].copy(), E_train[idx_to].copy()
+
+        return X_train, X_test, T_train, T_test, E_train, E_test
+
+    
+    def ohe_matrices(self, X=None, device="cpu"):
+        if X is None:
+            X = self.X
+        return ohe_matrices(X, self.categorical_values, device)
 
 
 class Rossi(SurvivalDataset):

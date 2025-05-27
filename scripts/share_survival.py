@@ -1,30 +1,21 @@
 import numpy as np
 import pandas as pd
-import warnings
 from pathlib import Path
 import argparse
-import os
 from datetime import datetime
+import sys 
+import wandb
+import torch
+sys.path.append('.')
 
-# Data
 from survshares.datasets import Rossi, Metabric, GBSG2
-from sklearn.model_selection import train_test_split
+from survshares.metrics import negative_pll
+from survshares.hazard_model import HazardModel
+from survshares.loss import approximateNpllLoss, npllLoss
+from survshares.symbolic_regressor import SurvSymbolicRegressor
 
-# Fitness
-from lifelines.utils import concordance_index
-from gplearn.gplearn.fitness import make_fitness
-from pycox.evaluation.metrics import partial_log_likelihood_ph
-from sksurv.util import Surv
-from sksurv.metrics import integrated_brier_score
-
-# Wrapper
-from sklearn.base import BaseEstimator, RegressorMixin
-from pycox.models.cox import _CoxPHBase
-import torchtuples as tt
-
-# SHAREs
-from gplearn.gplearn.genetic import SymbolicRegressor
 from gplearn.gplearn.model import ShapeNN
+from gplearn.gplearn.fitness import make_fitness
 from experiments.utils import (
     load_share_from_checkpoint,
     get_n_shapes,
@@ -35,105 +26,39 @@ from experiments.utils import (
 DATASETS = dict(
     rossi=Rossi(),
     metabric=Metabric(),
-    gbsg2=GBSG2(),
+    gbsg2=GBSG2()
 )
 
-
-##### Fitness Functions #####
-def metric_c_index(y_true, y_pred, sample_weight):
+##### Fitness #####
+def fitness_npll_shrink(y_true, y_pred, sample_weight):
     """
-    Protected concordance score metric for gplearn. Greater is better.
+    Partial log-likelihood with shrink penalty for gplearn. Smaller is better.
     """
-    # y_true is the event time, y_pred is the predicted risk
-    # sample_weight is the event indicator
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", category=RuntimeWarning)
-        try:
-            return concordance_index(y_true, np.exp(y_pred), sample_weight)
-        except ZeroDivisionError:  # In case of no unambigous pairs
-            return 0.5
-        except RuntimeWarning:  # In case of invalid log or exp overflow
-            return 0.5
-
-
-def metric_partial_likelihood(y_true, y_pred, sample_weight):
-    """
-    Cox partial likelihood metric for gplearn. Less is better.
-    """
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", category=RuntimeWarning)
-        # We want to minimise the negative partial log likelihood
-        # y_pred should be the LOG partial hazards - i.e. we admit negative vaues
-        try:
-            pll = partial_log_likelihood_ph(y_pred, y_true, sample_weight, mean=True)
-            return -pll  # Flip the sign to make it a minimization function
-        except RuntimeWarning:  # In case of invalid log or exp overflow
-            return np.inf
-
-
-def metric_integrated_brier(surv_pred, E_train, T_train, E_test=None, T_test=None):
-    """
-    Integrated Brier score for pycox-type models
-    """
-    E_test = E_test if E_test is not None else E_train
-    T_test = T_test if T_test is not None else T_train
-
-    y_train, y_test = Surv.from_arrays(E_train, T_train), Surv.from_arrays(
-        E_test, T_test
-    )
-
-    times = surv_pred.index.values[1:-1]
-    times = times[(times > T_test.min()) & (times < T_test.max())]
-    surv_pred = surv_pred.loc[times, :].T
-
-    return integrated_brier_score(y_train, y_test, surv_pred, times)
-
-
-def fitness_c_shrink(y_true, y_pred, sample_weight):
-    """
-    Concordance index with shrinkage penalty for gplearn. Greater is better.
-    """
-    return metric_c_index(y_true, y_pred, sample_weight) - 0.05 * np.abs(y_pred).mean()
-
-
-def fitness_pll_shrink(y_true, y_pred, sample_weight):
-    """
-    Partial log-likelihood with shrinkage penalty for gplearn. Smaller is better.
-    """
-    pll = metric_partial_likelihood(y_true, y_pred, sample_weight)
+    pll = negative_pll(y_true, y_pred, sample_weight)
     return pll + 0.05 * np.abs(y_pred).mean()
 
 
 FITNESS = dict(
-    c_index=make_fitness(function=metric_c_index, greater_is_better=True),
-    c_shrink=make_fitness(function=fitness_c_shrink, greater_is_better=True),
-    pll_shrink=make_fitness(function=fitness_pll_shrink, greater_is_better=False),
+    npll_shrink = make_fitness(function=fitness_npll_shrink, greater_is_better=False)
 )
 
-
-##### Wrapper #####
-class SymRegPH(BaseEstimator, RegressorMixin, _CoxPHBase):
-    """
-    Wrapper for gplearn's SymbolicRegressor to use with pycox supporting functions
-    """
-
-    def __init__(self, model):
-        self.model = model
-
-    def predict(self, X, *args, **kwargs):
-        if isinstance(X, tt.TupleTree):
-            X = X[0]
-        return self.model.predict(X)
-
+##### Loss #####
+LOSS = dict(
+    npll_approximate=approximateNpllLoss(),
+    npll_breslow=npllLoss(ties_method="breslow"),
+    npll_efron=npllLoss(ties_method="efron"),
+)
 
 ##### SHAREs #####
-def init_share_regressor(metric, device, checkpoint_dir, categorical_variables={}):
+def init_share_regressor(population_size, generations, metric, loss_fn, device, checkpoint_dir, wandb_run, categorical_variables={}):
     gp_config = {
-        "population_size": 69,
-        "generations": 10,
+        "logging_console": True,
+        "logging_wandb": True, 
+        "wandb_run": wandb_run,
+        "population_size": population_size,
+        "generations": generations,
         "tournament_size": 10,
         "function_set": ("add", "mul", "div", "shape"),
-        "verbose": True,
         "random_state": 42,
         "const_range": None,
         "n_jobs": 1,
@@ -163,104 +88,92 @@ def init_share_regressor(metric, device, checkpoint_dir, categorical_variables={
             "seed": 42,
             "checkpoint_folder": checkpoint_dir,
             "keep_models": True,
+            "loss_fn": loss_fn, 
         },
     }
 
-    return SymbolicRegressor(**gp_config, categorical_variables=categorical_variables)
-
+    return SurvSymbolicRegressor(**gp_config, categorical_variables=categorical_variables)
 
 def test_share_ph(
-    dataset_name, metric_name, device, checkpoint_dir, categorical_variables=False
-):
-    # Prepare dataset
+    dataset_name, metric_name, loss_name, population_size, generations, device, checkpoint_dir, wandb_run
+): 
     dataset = DATASETS[dataset_name]
-    X, T, E = dataset.load(normalise=False)
-    X_train, X_test, T_train, T_test, E_train, E_test = train_test_split(
-        X, T, E, test_size=0.2, random_state=42
-    )
-    feature_names = dataset.features
-    categoricals = dataset.categorical_dict if categorical_variables else {}
+    dataset.load()
+    X_train, X_test, T_train, T_test, E_train, E_test = dataset.split()
+    feature_names = dataset.features 
+    categorical_variables = dataset.categorical_values
 
-    # Initialise model
     fitness = FITNESS[metric_name]
+    loss_fn = LOSS[loss_name]
+
     model = init_share_regressor(
+        population_size=population_size,
+        generations=generations,
         metric=fitness,
+        loss_fn=loss_fn,
         device=device,
         checkpoint_dir=checkpoint_dir,
-        categorical_variables=categoricals,
-    )  # .set_params(feature_names=feature_names) # causes issues with reloading
+        wandb_run=wandb_run,
+        categorical_variables=categorical_variables
+    )
+    
+    def generation_callback(population, best_program): 
+        esr_wrap = HazardModel(
+            best_program,
+            categorical_variables=categorical_variables,
+        ).prepare_estimands(X_train, T_train, E_train)
+        scores = esr_wrap.score(X_test, T_test, E_test, extended=False)
+        scores.update(dict(
+            id=best_program.id,
+            # length=best_program.length_,
+            # raw_fitness_=best_program.raw_fitness_,
+            n_shapes=get_n_shapes(str(best_program)),
+            n_variables=get_n_variables(str(best_program)),
+        ))
+        wandb.log(scores)
 
-    # Fit model
     print("Starting model fit")
-    model.fit(X_train, T_train, sample_weight=E_train)
+    model.fit(torch.Tensor(X_train), torch.Tensor(T_train), torch.Tensor(E_train), generation_callback)
     print("Finished model fit")
     timestamp = model.timestamp
-    # timestamp = max(
-    #     os.listdir(checkpoint_dir),
-    #     key=lambda x: datetime.strptime(x, "%Y-%m-%dT%H.%M.%S"),
-    # )
 
-    # Load results dataframe
     results_df = pd.read_csv(checkpoint_dir / timestamp / "dictionary.csv")
 
-    print("Adding validation results")
-    n_shapes, n_variables, loss_train, loss_test, c_test, brier_test = (
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-    )
-    for idx, id, eq, _, _ in results_df.itertuples():
-        print(eq)
-        n_shapes.append(get_n_shapes(eq))
-        n_variables.append(get_n_variables(eq))
+    validation_results = []
+    for idx, id, eq, raw_fitness in results_df.itertuples():
 
         esr = load_share_from_checkpoint(
             timestamp,
             eq,
             checkpoint_dir=checkpoint_dir,
-            task="regression",
+            task="survival",
             n_features=len(feature_names),
             equation_id=id,
+            loss_fn=loss_fn,
+            categorical_variables_dict=categorical_variables,
         )
 
-        esr_wrap = SymRegPH(model=esr)
-        h_train, h_test = esr_wrap.predict(X_train), esr_wrap.predict(X_test)
-        h0 = esr_wrap.compute_baseline_hazards(X_train, (T_train, E_train))
-        surv_test = esr_wrap.predict_surv_df(X_test)
+        esr_wrap = HazardModel(
+            esr,
+            categorical_variables=categorical_variables,
+        ).prepare_estimands(X_train, T_train, E_train)
 
-        loss_train.append(fitness(T_train, h_train, E_train))
-        loss_test.append(fitness(T_test, h_test, E_test))
-        c_test.append(metric_c_index(T_test, h_test, E_test))
+        scores = esr_wrap.score(X_test, T_test, E_test, extended=False)
 
-        brier = np.nan
-        if not surv_test.isna().any().any():  # Junk models will yield NaN values
-            try:
-                brier = metric_integrated_brier(
-                    surv_test, E_train, T_train, E_test, T_test
-                )
-            except Exception:
-                pass
-        brier_test.append(brier)
+        scores.update(dict(
+            id=id,
+            n_shapes=get_n_shapes(eq),
+            n_variables=get_n_variables(eq),
+        ))
 
-    results_df["n_shapes"] = n_shapes
-    results_df["n_variables"] = n_variables
-    results_df["loss_train"] = loss_train
-    results_df["loss_test"] = loss_test
-    results_df["c_test"] = c_test
-    results_df["brier_test"] = brier_test
+        validation_results.append(scores)
+        # wandb.log(scores)
 
-    # ad-hoc correction for flipped sign in y_pred
-    if results_df["c_test"].mean() < 0.5:
-        results_df["c_test"] = 1 - results_df["c_test"]
+    score_df = pd.DataFrame(validation_results).set_index('id')
+    results_df = results_df.set_index('id').join(score_df, how='left')
+    results_df.to_csv(checkpoint_dir / timestamp / "results.csv")
 
-    out_path = checkpoint_dir / timestamp / "output.csv"
-    print(f"Saving results to {out_path}")
-    results_df.to_csv(out_path, index=False)
-
-    print("Done.")
+    print('Done')
 
 
 if __name__ == "__main__":
@@ -277,8 +190,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--metric",
         type=str,
-        default="c_index",
-        choices=["c_index", "c_shrink", "pll_shrink"],
+        default="npll_shrink",
+        choices=["npll_shrink"],
+        help="Metric to use for fitness function",
+    )
+    parser.add_argument(
+        "--loss",
+        type=str,
+        default="npll_approximate",
+        choices=["npll_approximate", "npll_breslow", "npll_efron"],
         help="Metric to use for fitness function",
     )
     parser.add_argument(
@@ -295,9 +215,16 @@ if __name__ == "__main__":
         help="Path to save working models",
     )
     parser.add_argument(
-        "--categorical",
-        action="store_true",
-        help="Use categorical variables in SHARE",
+        "--population_size",
+        type=int,
+        default=69,
+        help="Population size for the symbolic regressor",
+    )
+    parser.add_argument(
+        "--generations",
+        type=int,
+        default=10,
+        help="Number of generations for the symbolic regressor",
     )
 
     args = parser.parse_args()
@@ -306,6 +233,24 @@ if __name__ == "__main__":
 
     print(args)
 
-    test_share_ph(
-        args.dataset, args.metric, args.device, checkpoint_dir, args.categorical
+    wandb_run = wandb.init(
+        project="share_survival",
+        name=f"{args.dataset}_{args.metric}_{args.loss}",
+        config={
+            "dataset": args.dataset,
+            "metric": args.metric,
+            "loss": args.loss,
+            "device": args.device,
+            "checkpoints": str(checkpoint_dir),
+            "population_size": args.population_size,
+            "generations": args.generations,
+        }
     )
+
+    test_share_ph(
+        args.dataset, args.metric, args.loss, args.population_size, args.generations, args.device, checkpoint_dir, wandb_run
+    )
+
+    wandb.finish()
+
+

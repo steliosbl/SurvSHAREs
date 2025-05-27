@@ -33,7 +33,7 @@ class npllLoss(torch.nn.Module):
             ties_method=self.ties_method,
             checks=False,
         )
-        if result.isnan():
+        if result.isnan() or result.isneginf():
             result = torch.inf 
         return result
 
@@ -53,4 +53,7 @@ class approximateNpllLoss(torch.nn.Module):
             warnings.warn(f"{self.__class__.__name__} only supports mean reduction")
 
     def forward(self, input, target, weight):
-        return cox_ph_loss(log_h=input, durations=target, events=weight, eps=1e-7)
+        result = cox_ph_loss(log_h=input, durations=target, events=weight, eps=1e-7)
+        if result.isnan() or result.isneginf():
+            result = torch.inf
+        return result 

@@ -2,7 +2,7 @@ import warnings
 import wandb
 
 from gplearn.gplearn.genetic import BaseSymbolic, SymbolicRegressor
-
+from survshares.program import SurvProgram
 
 class BaseSurvSymbolic(BaseSymbolic):
     """
@@ -36,7 +36,8 @@ class BaseSurvSymbolic(BaseSymbolic):
                  categorical_variables=[],
                  logging_console=True,
                  logging_wandb=False,
-                 wandb_run=None):
+                 wandb_run=None,
+                 program_class=SurvProgram):
         
         super().__init__(
             population_size=population_size,
@@ -62,7 +63,8 @@ class BaseSurvSymbolic(BaseSymbolic):
             verbose=True, # Always verbose so we can handle logging here
             random_state=random_state,
             optim_dict=optim_dict,
-            categorical_variables=categorical_variables)
+            categorical_variables=categorical_variables,
+            program_class=program_class)
 
         self.logging_console, self.logging_wandb = logging_console, logging_wandb
         self.wandb_run = wandb_run

@@ -6,11 +6,11 @@ import torchtuples as tt
 
 from sklearn.base import BaseEstimator, RegressorMixin
 from pycox.models.cox import _CoxPHBase
-from gplearn.gplearn.genetic import SymbolicRegressor
 from gplearn.gplearn._program import _Program as _ShareProgram 
 from sksurv.util import Surv
 from sksurv.util import check_y_survival
 
+from survshares.datasets import ohe_matrices
 from survshares.plot import calibration_plot_binned, calibration_plot_smoothed
 
 from sksurv.metrics import (
@@ -41,22 +41,16 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         if isinstance(X, tt.TupleTree):
             X = X[0]
 
-        if hasattr(self.model, 'predict'):
-            return self.model.predict(X)
-        elif isinstance(self.model, _ShareProgram):
-            ohe_matrices = {}
+        if isinstance(self.model, _ShareProgram):
+            ohe = {}
+            if self.categorical_variables is not None: 
+                ohe = ohe_matrices(X, self.categorical_variables, self.model.optim_dict.get("device"))
 
-            if self.categorical_variables is not None:
-                ohe_matrices = SymbolicRegressor._create_ohe_matrices(
-                    None,
-                    X,
-                    self.categorical_variables,
-                    self.model.optim_dict.get("device"),
-                )
-
-            return self.model.execute(X, ohe_matrices)
+            return self.model.execute(torch.Tensor(X), ohe)
         elif hasattr(self.model, 'execute'):
             return self.model.execute(X)
+        elif hasattr(self.model, 'predict'):
+            return self.model.predict(X)
         else:
             raise ValueError(
                 "Model must be a BaseSymbolic or _Program instance."
@@ -83,10 +77,16 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         # Run metrics
         brier, integrated_brier = (None, None), None
         if not surv_pred.isna().any().any():
-            brier = brier_score(self.y_train, y_test, surv_pred.loc[times, :].T, times)
-            integrated_brier = integrated_brier_score(
-                self.y_train, y_test, surv_pred.loc[times, :].T, times
-            )
+            try:
+                brier = brier_score(self.y_train, y_test, surv_pred.loc[times, :].T, times)
+                integrated_brier = integrated_brier_score(
+                    self.y_train, y_test, surv_pred.loc[times, :].T, times
+                )
+            except ValueError as e:
+                if "time must be smaller than largest observed time point" in str(e):
+                    raise ValueError("Validation T contains times larger than the largest observed time point in training data. ")
+                else:
+                    raise e
         
         c_censored = concordance_index_censored((E == 1) if not E.dtype in (torch.bool, np.bool) else E, T, h_pred)
         c_ipcw = concordance_index_ipcw(y_train_adjusted, y_test, h_pred)
@@ -95,7 +95,7 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         get_npll = lambda ties: neg_partial_log_likelihood(
             torch.tensor(h_pred),
             torch.tensor(E, dtype=torch.bool),
-            torch.tensor(T.copy()),
+            torch.tensor(T),
             ties_method=ties,
             reduction="mean",
             checks=True,

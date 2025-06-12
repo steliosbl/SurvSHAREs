@@ -33,8 +33,10 @@ class npllLoss(torch.nn.Module):
             ties_method=self.ties_method,
             checks=False,
         )
-        if result.isnan() or result.isneginf():
-            result = torch.inf 
+        if result.isnan():
+            result = torch.tensor(torch.inf, requires_grad=True)
+        elif result.isneginf():
+            result = -result
         return result
 
 
@@ -54,6 +56,8 @@ class approximateNpllLoss(torch.nn.Module):
 
     def forward(self, input, target, weight):
         result = cox_ph_loss(log_h=input, durations=target, events=weight, eps=1e-7)
-        if result.isnan() or result.isneginf():
-            result = torch.inf
+        if result.isnan():
+            result = torch.tensor(torch.inf, requires_grad=True)
+        elif result.isneginf():
+            result = -result
         return result 

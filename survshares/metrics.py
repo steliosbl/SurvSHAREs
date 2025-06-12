@@ -64,11 +64,14 @@ def negative_pll(y_true, y_pred, sample_weight):
     """
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
-        return neg_partial_log_likelihood(
+        result = neg_partial_log_likelihood(
             torch.tensor(y_pred),
             torch.tensor(sample_weight, dtype=torch.bool),
             torch.tensor(y_true),
             ties_method="efron",
             reduction="mean",
             checks=True,
-        ).item()
+        )
+        if result.isnan() or result.isneginf():
+            result = torch.tensor(np.inf)
+        return result.item()

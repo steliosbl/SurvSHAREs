@@ -8,7 +8,7 @@ import wandb
 import torch
 sys.path.append('.')
 
-from survshares.datasets import Rossi, Metabric, GBSG2
+from survshares.datasets import SurvivalDataset, Metabric
 from survshares.metrics import negative_pll
 from survshares.hazard_model import HazardModel
 from survshares.loss import approximateNpllLoss, npllLoss
@@ -24,9 +24,9 @@ from experiments.utils import (
 
 ##### Data #####
 DATASETS = dict(
-    rossi=Rossi(),
+    rossi=SurvivalDataset("Rossi"),
     metabric=Metabric(),
-    gbsg2=GBSG2()
+    gbsg2=SurvivalDataset("GBSG2")
 )
 
 ##### Fitness #####

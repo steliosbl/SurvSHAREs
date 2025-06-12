@@ -29,11 +29,11 @@ class SurvProgram(_Program):
         # Scatter data for categorical shape functions
         scatter_data = []
         for key, (range_min, range_max) in cat_arg_ranges.items():
-            range_min, range_max = categorical_values[key]
+            cat_range = categorical_values[key]
             shape = self.model.cat_shape_functions[str(key)]
             shape.to(torch.device("cpu"))
             with torch.no_grad():
-                t = np.array([range_min, range_max])
+                t = np.array(cat_range)
                 y = shape.numpy() * t
             scatter_data += [
                 dict(x=x, y=y_val, key=str(key))

@@ -90,7 +90,10 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         
         c_censored = concordance_index_censored((E == 1) if not E.dtype in (torch.bool, np.bool) else E, T, h_pred)
         c_ipcw = concordance_index_ipcw(y_train_adjusted, y_test, h_pred)
-        auc = cumulative_dynamic_auc(y_train_adjusted, y_test, h_pred, times)
+
+        # AUC has a problem with nan values, so we manually compute the mean 
+        auc = cumulative_dynamic_auc(y_train_adjusted, y_test, h_pred, times)[0] 
+        auc = dict(values=auc, mean=np.nanmean(auc))
 
         get_npll = lambda ties: neg_partial_log_likelihood(
             torch.tensor(h_pred),
@@ -112,8 +115,6 @@ class HazardModel(BaseEstimator, RegressorMixin, _CoxPHBase):
         c_censored, c_ipcw = dict(zip(c_idx_names, c_censored)), dict(
             zip(c_idx_names, c_ipcw)
         )
-
-        auc = dict(zip(["values", "mean"], auc))
 
         npll = dict(efron=npll_efron, breslow=npll_breslow)
 
